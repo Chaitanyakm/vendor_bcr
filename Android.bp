@@ -1,0 +1,16 @@
+soong_namespace {
+
+}
+
+android_app_import {
+	name: "bcr",
+	owner: "chenxiaolong",
+	apk: "prebuilts/product/priv-app/bcr/bcr.apk",
+	preprocessed: true,
+	presigned: true,
+	dex_preopt: {
+		enabled: false,
+	},
+	privileged: true,
+	product_specific: true,
+}
