@@ -1,0 +1,81 @@
+name: Auto-Update BCR APK
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs at midnight UTC daily
+  workflow_dispatch: # Allows manual triggers
+
+jobs:
+  update-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write 
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch, download, and extract APK
+        id: fetch_release
+        run: |
+          # Fetch the latest release data from the upstream BCR repository
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/chenxiaolong/BCR/releases/latest)
+          
+          # Extract the version tag
+          LATEST_TAG=$(echo "$LATEST_RELEASE" | jq -r .tag_name)
+          echo "Latest upstream tag: $LATEST_TAG"
+          
+          # Save the tag to the GitHub environment
+          echo "TAG=$LATEST_TAG" >> $GITHUB_ENV
+          
+          # Find the direct download URL for the .zip asset instead of .apk
+          ZIP_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name | endswith(".zip")) | .browser_download_url' | head -n 1)
+          
+          if [ -z "$ZIP_URL" ] || [ "$ZIP_URL" == "null" ]; then
+            echo "Error: No ZIP found in the latest release!"
+            exit 1
+          fi
+          
+          echo "Downloading ZIP from: $ZIP_URL"
+          wget -qO bcr-release.zip "$ZIP_URL"
+          
+          echo "Extracting ZIP..."
+          # Extract into a temporary directory called bcr_temp
+          unzip -q bcr-release.zip -d bcr_temp
+          
+          # Find the APK inside the unzipped folder (looking for any .apk file)
+          APK_PATH=$(find bcr_temp -name "*.apk" | head -n 1)
+          
+          if [ -z "$APK_PATH" ]; then
+            echo "Error: Could not find an APK inside the extracted ZIP!"
+            exit 1
+          fi
+          
+          echo "Found APK at: $APK_PATH"
+          
+          # Ensure the target directory exists in your repo
+          mkdir -p prebuilts/product/priv-app/bcr/
+          
+          # Move the extracted APK to your repo's path and rename it to bcr.apk
+          mv "$APK_PATH" prebuilts/product/priv-app/bcr/bcr.apk
+          
+          # Clean up the temporary folder and downloaded zip file
+          rm -rf bcr-release.zip bcr_temp
+
+      - name: Commit and Push changes
+        run: |
+          # Configure git as the GitHub Actions bot
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # Stage the APK file
+          git add prebuilts/product/priv-app/bcr/bcr.apk
+          
+          # Check if the APK actually changed
+          if git diff --staged --quiet; then
+            echo "No new version found. The APK is already up to date."
+          else
+            echo "New version found! Committing..."
+            git commit -m "Version ${{ env.TAG }}"
+            git push
+          fi
